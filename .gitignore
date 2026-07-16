@@ -1,0 +1,15 @@
+node_modules/
+dist/
+.vite/
+*.log
+vite-dev.log
+vite-dev.err.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.DS_Store
+Thumbs.db
+Guardrails.txt
+\[Staircase Parameters\].txt
+.agents/
+.codex/

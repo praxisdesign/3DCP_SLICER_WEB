@@ -1,0 +1,30 @@
+{
+  "name": "3dcp-slicer-web",
+  "version": "1.0.0",
+  "description": "Local browser-based parametric tower generator for stacked floor slab geometries.",
+  "main": "index.html",
+  "scripts": {
+    "dev": "vite --host 127.0.0.1",
+    "build": "vite build",
+    "preview": "vite preview --host 127.0.0.1"
+  },
+  "keywords": [],
+  "type": "module",
+  "dependencies": {
+    "@react-three/drei": "^10.7.7",
+    "@react-three/fiber": "^9.6.1",
+    "@vitejs/plugin-react": "^6.0.3",
+    "clipper-lib": "^6.4.2",
+    "comlink": "^4.4.2",
+    "leva": "^0.10.1",
+    "lucide-react": "^1.24.0",
+    "martinez-polygon-clipping": "^0.8.1",
+    "occt-import-js": "^0.0.23",
+    "react": "^19.2.7",
+    "react-dom": "^19.2.7",
+    "rhino3dm": "^8.17.0",
+    "three": "^0.185.1",
+    "vite": "^8.1.4",
+    "zustand": "^5.0.14"
+  }
+}
