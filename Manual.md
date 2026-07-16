@@ -181,3 +181,63 @@ bead 프리뷰 표시 여부를 켜거나 끕니다.
 8. `G-code 미리보기`로 생성 결과를 확인합니다.
 9. `G-code 다운로드`로 파일을 저장합니다.
 10. 실제 프린터에 보내기 전에 G-code를 별도로 검증합니다.
+
+## 홈페이지 접속 및 삽입
+
+### GitHub Pages 주소
+
+GitHub Pages 배포가 활성화되어 있으면 아래 주소로 3DCP Slicer Web에 접속할 수 있습니다.
+
+```text
+https://praxisdesign.github.io/3DCP_SLICER_WEB/
+```
+
+매뉴얼 파일은 아래 주소에서 직접 열 수 있습니다.
+
+```text
+https://praxisdesign.github.io/3DCP_SLICER_WEB/Manual.md
+```
+
+### GitHub Pages 설정 방법
+
+GitHub 저장소에서 Pages를 설정하려면 다음 순서로 진행합니다.
+
+1. GitHub 저장소로 이동합니다.
+2. `Settings` 메뉴를 엽니다.
+3. 좌측 메뉴에서 `Pages`를 선택합니다.
+4. `Build and deployment` 항목에서 `Deploy from a branch`를 선택합니다.
+5. Branch를 `gh-pages`로 선택합니다.
+6. Folder는 `/root`로 선택합니다.
+7. 저장 후 배포가 완료될 때까지 기다립니다.
+
+### 외부 홈페이지에 삽입
+
+다른 홈페이지나 문서 페이지 안에 3DCP Slicer Web을 삽입하려면 `iframe`을 사용할 수 있습니다.
+
+```html
+<iframe
+  src="https://praxisdesign.github.io/3DCP_SLICER_WEB/"
+  title="3DCP Slicer Web"
+  width="100%"
+  height="720"
+  style="border: 0; width: 100%; min-height: 720px;"
+  allow="clipboard-read; clipboard-write"
+></iframe>
+```
+
+삽입 시 권장 조건:
+
+- 화면 높이는 최소 `720px` 이상을 권장합니다.
+- 파일 업로드 기능을 사용하려면 삽입된 페이지에서 브라우저 파일 선택 권한이 정상 동작해야 합니다.
+- 좁은 모바일 영역에서는 좌측 패널과 뷰포트가 세로 배치로 전환됩니다.
+- 3D 모델과 WASM 파일을 사용하므로 초기 로딩 시간이 조금 걸릴 수 있습니다.
+
+### 링크로 연결
+
+iframe 삽입 대신 버튼이나 링크로 연결하려면 아래 HTML을 사용할 수 있습니다.
+
+```html
+<a href="https://praxisdesign.github.io/3DCP_SLICER_WEB/" target="_blank" rel="noopener">
+  3DCP Slicer Web 열기
+</a>
+```
