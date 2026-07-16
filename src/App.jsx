@@ -256,6 +256,23 @@ export default function App() {
           </button>
         </section>
 
+        {gcodePreview && (
+          <section className="panel gcode-panel">
+            <button
+              className="collapse-header"
+              type="button"
+              aria-expanded={isGcodePreviewOpen}
+              onClick={() => setIsGcodePreviewOpen((value) => !value)}
+            >
+              <span>G-code Preview</span>
+              <ChevronDown size={17} aria-hidden="true" />
+            </button>
+            {isGcodePreviewOpen && (
+              <textarea readOnly value={gcodePreview} spellCheck="false" />
+            )}
+          </section>
+        )}
+
         <section className="panel">
           <h2>
             <Gauge size={17} aria-hidden="true" />
@@ -299,23 +316,6 @@ export default function App() {
             onChange={(value) => updateSetting('pumpOffCommand', value)}
           />
         </section>
-
-        {gcodePreview && (
-          <section className="panel gcode-panel">
-            <button
-              className="collapse-header"
-              type="button"
-              aria-expanded={isGcodePreviewOpen}
-              onClick={() => setIsGcodePreviewOpen((value) => !value)}
-            >
-              <span>G-code Preview</span>
-              <ChevronDown size={17} aria-hidden="true" />
-            </button>
-            {isGcodePreviewOpen && (
-              <textarea readOnly value={gcodePreview} spellCheck="false" />
-            )}
-          </section>
-        )}
 
         <section className="panel">
           <h2>
