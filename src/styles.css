@@ -17,11 +17,14 @@ body,
 #root {
   width: 100%;
   height: 100%;
+  min-height: 0;
   margin: 0;
+  overflow: hidden;
 }
 
 body {
-  overflow: hidden;
+  min-width: 320px;
+  overscroll-behavior: none;
 }
 
 button,
@@ -33,7 +36,10 @@ input {
   display: grid;
   grid-template-columns: 340px minmax(0, 1fr);
   width: 100%;
-  height: 100%;
+  height: 100vh;
+  height: 100dvh;
+  min-height: 0;
+  overflow: hidden;
   background: #edf1f5;
 }
 
@@ -42,10 +48,17 @@ input {
   flex-direction: column;
   gap: 14px;
   min-width: 0;
+  min-height: 0;
   padding: 18px;
   border-right: 1px solid #d8dee8;
   background: #f8fafc;
   overflow: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: none;
+}
+
+.sidebar::-webkit-scrollbar {
+  display: none;
 }
 
 .app-header {
@@ -247,9 +260,9 @@ input {
 
 .gcode-panel textarea {
   width: 100%;
-  height: 220px;
+  height: clamp(120px, 24vh, 220px);
   margin-top: 12px;
-  resize: vertical;
+  resize: none;
   border: 1px solid #d8dee8;
   border-radius: 8px;
   padding: 10px;
@@ -323,7 +336,9 @@ input {
 .viewport {
   position: relative;
   min-width: 0;
+  min-height: 0;
   height: 100%;
+  overflow: hidden;
 }
 
 canvas {
@@ -333,7 +348,7 @@ canvas {
 @media (max-width: 820px) {
   .app-shell {
     grid-template-columns: 1fr;
-    grid-template-rows: minmax(260px, 42vh) minmax(0, 1fr);
+    grid-template-rows: minmax(220px, 42dvh) minmax(0, 1fr);
   }
 
   .sidebar {
@@ -344,5 +359,58 @@ canvas {
 
   .viewport {
     grid-row: 1;
+  }
+}
+
+@media (max-height: 820px) {
+  .sidebar {
+    gap: 9px;
+    padding: 12px;
+  }
+
+  .app-header {
+    min-height: 40px;
+  }
+
+  .file-drop,
+  .panel,
+  .stats {
+    padding: 11px;
+  }
+
+  .panel h2 {
+    margin-bottom: 8px;
+  }
+
+  .control,
+  .text-control,
+  .playback-row {
+    margin-top: 9px;
+  }
+
+  .primary-action {
+    margin-top: 10px;
+  }
+
+  .stats p {
+    margin-bottom: 8px;
+  }
+}
+
+@media (max-width: 480px) {
+  .app-shell {
+    grid-template-rows: minmax(190px, 38dvh) minmax(0, 1fr);
+  }
+
+  .sidebar {
+    padding: 10px;
+  }
+
+  .app-header p {
+    display: none;
+  }
+
+  .stats dl {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
