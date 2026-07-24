@@ -54,6 +54,28 @@ function reinforcementTypeLabel(value) {
   return REINFORCEMENT_TYPES.find((type) => type.value === value)?.label ?? value;
 }
 
+// Module-level (not an inline JSX literal) purely so it's not recreated every render.
+const cameraUpVector = [0, 0, 1];
+
+// Guards against ever saving or restoring a broken camera snapshot -- e.g. one
+// captured mid-glitch during the Canvas/OrbitControls settling window (position and
+// target collapsed to the same point, or a NaN/Infinity from a divide-by-zero in that
+// state). Restoring a snapshot like this reproduces the exact "camera won't move"
+// symptom on every future visit, since OrbitControls' spherical math breaks down once
+// its radius is zero and never recovers on its own.
+function isValidCameraSnapshot(camera) {
+  if (!camera || !Array.isArray(camera.position) || !Array.isArray(camera.target)) {
+    return false;
+  }
+  const values = [...camera.position, ...camera.target];
+  if (values.length !== 6 || values.some((value) => typeof value !== 'number' || !Number.isFinite(value))) {
+    return false;
+  }
+  const [px, py, pz] = camera.position;
+  const [tx, ty, tz] = camera.target;
+  return Math.hypot(px - tx, py - ty, pz - tz) > 1e-4;
+}
+
 export default function App() {
   const [model, setModel] = useState(null);
   const [settings, setSettings] = useState(defaultSettings);
@@ -65,7 +87,10 @@ export default function App() {
   const [layerAnimationSpeed, setLayerAnimationSpeed] = useState(6);
   const [reinforcementPlan, setReinforcementPlan] = useState([]);
   const [reinforcementDraft, setReinforcementDraft] = useState({ type: 'mesh', note: '' });
+  const [restoredCamera, setRestoredCamera] = useState(null);
   const fileRef = useRef(null);
+  const cameraStateRef = useRef(null);
+  const controlsRef = useRef(null);
   const projectIdRef = useRef(getProjectId());
 
   // Restore the last autosaved model/settings for this project (if any) on mount --
@@ -75,6 +100,17 @@ export default function App() {
     let cancelled = false;
     (async () => {
       try {
+        // Give the Canvas/OrbitControls default-camera registration time to fully
+        // settle before touching the model or camera at all. Setting either too soon
+        // after the Canvas first mounts gets silently overwritten a moment later, and
+        // can even leave OrbitControls unresponsive to further drag/orbit input
+        // afterward -- a fresh upload never hits this, since the user has already
+        // spent a couple of seconds picking a file by the time it happens.
+        await new Promise((resolve) => window.setTimeout(resolve, 1200));
+        if (cancelled) {
+          return;
+        }
+
         const snapshot = await loadSnapshot(projectIdRef.current);
         if (!snapshot || cancelled) {
           return;
@@ -93,6 +129,10 @@ export default function App() {
         }
         if (snapshot.reinforcementPlan) {
           setReinforcementPlan(snapshot.reinforcementPlan);
+        }
+        if (isValidCameraSnapshot(snapshot.camera)) {
+          cameraStateRef.current = snapshot.camera;
+          setRestoredCamera(snapshot.camera);
         }
         setStatus(`${snapshot.file.name} 복원 완료 (자동 저장된 이전 작업)`);
       } catch {
@@ -118,6 +158,7 @@ export default function App() {
         file: fileRef.current,
         settings,
         reinforcementPlan,
+        camera: cameraStateRef.current,
       }).catch(() => {
         // Best-effort autosave; ignore storage errors (quota, private browsing, etc).
       });
@@ -125,6 +166,60 @@ export default function App() {
 
     return () => window.clearTimeout(timeout);
   }, [model, settings, reinforcementPlan]);
+
+  // A page refresh can land well inside the 800ms debounce window above, discarding
+  // whatever change triggered it -- unlike the camera (saved immediately on drag-end),
+  // settings/reinforcement changes had no such safety net. Flush immediately whenever
+  // the tab is about to go away, so "change a slider, then refresh right away" doesn't
+  // lose the change.
+  useEffect(() => {
+    function flushPendingSave() {
+      if (!fileRef.current) {
+        return;
+      }
+      saveSnapshot(projectIdRef.current, {
+        file: fileRef.current,
+        settings,
+        reinforcementPlan,
+        camera: cameraStateRef.current,
+      }).catch(() => {
+        // Best-effort; nothing more we can do if this fails during unload.
+      });
+    }
+
+    window.addEventListener('pagehide', flushPendingSave);
+    window.addEventListener('beforeunload', flushPendingSave);
+    return () => {
+      window.removeEventListener('pagehide', flushPendingSave);
+      window.removeEventListener('beforeunload', flushPendingSave);
+    };
+  }, [settings, reinforcementPlan]);
+
+  // OrbitControls fires onEnd once when the user releases a drag/zoom/pan -- a natural
+  // debounce point to persist the camera view without saving on every animation frame.
+  function handleCameraChangeEnd() {
+    const controls = controlsRef.current;
+    if (!controls || !fileRef.current) {
+      return;
+    }
+
+    const candidate = {
+      position: controls.object.position.toArray(),
+      target: controls.target.toArray(),
+    };
+    if (!isValidCameraSnapshot(candidate)) {
+      return;
+    }
+    cameraStateRef.current = candidate;
+    saveSnapshot(projectIdRef.current, {
+      file: fileRef.current,
+      settings,
+      reinforcementPlan,
+      camera: cameraStateRef.current,
+    }).catch(() => {
+      // Best-effort autosave; ignore storage errors (quota, private browsing, etc).
+    });
+  }
 
   const bounds = useMemo(() => {
     if (!model?.object) {
@@ -602,10 +697,20 @@ export default function App() {
       <section className="viewport">
         <Canvas shadows dpr={[1, 2]} gl={{ preserveDrawingBuffer: true }}>
           <color attach="background" args={['#edf1f5']} />
-          <PerspectiveCamera makeDefault position={[7, -9, 6]} up={[0, 0, 1]} fov={42} />
+          {/* No `position` prop: react-three-fiber re-applies vector-valued props via
+              .set(...) on every reconciliation pass, not just when the value changes --
+              with a position prop here, any unrelated re-render (e.g. layer scrubbing,
+              a settings tweak) would silently snap the camera back to this default,
+              undoing whatever FitCameraToModel/OrbitControls had set. Camera position is
+              owned entirely by FitCameraToModel (fit-to-model or restored) instead. */}
+          <PerspectiveCamera makeDefault up={cameraUpVector} fov={42} />
           <ambientLight intensity={0.7} />
           <directionalLight castShadow position={[7, 10, 6]} intensity={1.8} />
-          <Bounds fit clip observe margin={1.25}>
+          {/* `fit` is deliberately omitted: Bounds' own built-in auto-fit runs after
+              FitCameraToModel's effect (child effects fire before parent effects) and
+              would silently override a restored camera position. FitCameraToModel
+              calls bounds.fit() itself for genuinely new uploads. */}
+          <Bounds clip observe margin={1.25}>
             <SceneView
               model={model}
               bounds={bounds}
@@ -613,7 +718,7 @@ export default function App() {
               layers={sliceData.layers}
               settings={toMachineSettings(settings)}
             />
-            <FitCameraToModel modelKey={model?.name} />
+            <FitCameraToModel modelKey={model?.name} restoredCamera={restoredCamera} controlsRef={controlsRef} />
           </Bounds>
           <ZUpScene />
           <Grid
@@ -625,7 +730,7 @@ export default function App() {
             fadeDistance={22}
             fadeStrength={1}
           />
-          <OrbitControls makeDefault enableDamping />
+          <OrbitControls ref={controlsRef} makeDefault enableDamping onEnd={handleCameraChangeEnd} />
           <GizmoHelper alignment="bottom-left" margin={[72, 72]}>
             <GizmoViewport axisColors={['#dc2626', '#16a34a', '#2563eb']} labelColor="#111827" />
           </GizmoHelper>
@@ -647,14 +752,56 @@ function ZUpScene() {
   return null;
 }
 
-function FitCameraToModel({ modelKey }) {
+function FitCameraToModel({ modelKey, restoredCamera, controlsRef }) {
   const bounds = useBounds();
+  const { camera } = useThree();
+  // Tracks which modelKey the camera has already been initialized for, so this only
+  // runs once per model (a fresh upload should still auto-fit again for a new model).
+  const initializedForKeyRef = useRef(null);
 
   useEffect(() => {
-    if (modelKey) {
-      bounds.refresh().fit();
+    if (!modelKey || initializedForKeyRef.current === modelKey) {
+      return undefined;
     }
-  }, [bounds, modelKey]);
+    initializedForKeyRef.current = modelKey;
+
+    // A restored autosave should reappear exactly as the user left it, not re-framed
+    // to a generic fit -- that's what made the model feel like it "moved" on refresh.
+    // A genuinely new upload (no restoredCamera) still gets the normal auto-fit.
+    const apply = () => {
+      if (restoredCamera) {
+        camera.position.set(...restoredCamera.position);
+        camera.updateProjectionMatrix();
+        const controls = controlsRef.current;
+        if (controls) {
+          controls.target.set(...restoredCamera.target);
+          controls.update();
+        }
+      } else {
+        bounds.refresh().fit();
+      }
+    };
+
+    // Re-assert for a short window instead of applying once: right after the Canvas
+    // first mounts, the default-camera/OrbitControls registration can still be
+    // settling, which silently overwrites a same-tick set() a moment later and can
+    // even leave OrbitControls unresponsive to further drag/orbit input. This affects
+    // bounds.fit() just as much as a manual restore -- a fresh upload never hits it
+    // only because the user has already spent a couple of seconds picking a file by
+    // the time this effect runs.
+    let cancelled = false;
+    let frame = 0;
+    const reapply = () => {
+      if (cancelled) return;
+      apply();
+      frame += 1;
+      if (frame < 20) requestAnimationFrame(reapply);
+    };
+    reapply();
+    return () => {
+      cancelled = true;
+    };
+  }, [bounds, modelKey, restoredCamera, camera, controlsRef]);
 
   return null;
 }
