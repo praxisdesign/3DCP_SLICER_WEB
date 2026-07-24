@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Canvas, useThree } from '@react-three/fiber';
 import {
   Bounds,
@@ -22,6 +22,7 @@ import {
   Upload,
 } from 'lucide-react';
 import SceneView from './components/SceneView.jsx';
+import { getProjectId, loadSnapshot, saveSnapshot } from './utils/autosave.js';
 import { generateGCode } from './utils/gcode.js';
 import { loadModelFile } from './utils/modelLoaders.js';
 import { sliceModel } from './utils/slicer.js';
@@ -64,6 +65,66 @@ export default function App() {
   const [layerAnimationSpeed, setLayerAnimationSpeed] = useState(6);
   const [reinforcementPlan, setReinforcementPlan] = useState([]);
   const [reinforcementDraft, setReinforcementDraft] = useState({ type: 'mesh', note: '' });
+  const fileRef = useRef(null);
+  const projectIdRef = useRef(getProjectId());
+
+  // Restore the last autosaved model/settings for this project (if any) on mount --
+  // this is what lets a browser refresh (which wipes all in-memory iframe state) get
+  // the user's work back instead of losing it.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const snapshot = await loadSnapshot(projectIdRef.current);
+        if (!snapshot || cancelled) {
+          return;
+        }
+
+        setStatus(`${snapshot.file.name} 복원 중...`);
+        const loaded = await loadModelFile(snapshot.file);
+        if (cancelled) {
+          return;
+        }
+
+        fileRef.current = snapshot.file;
+        setModel(loaded);
+        if (snapshot.settings) {
+          setSettings(snapshot.settings);
+        }
+        if (snapshot.reinforcementPlan) {
+          setReinforcementPlan(snapshot.reinforcementPlan);
+        }
+        setStatus(`${snapshot.file.name} 복원 완료 (자동 저장된 이전 작업)`);
+      } catch {
+        // No autosave yet, or the browser blocked IndexedDB (e.g. private browsing);
+        // fall back to the default empty state.
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Debounced autosave -- keyed by project id, so two projects using this tool never
+  // overwrite each other's saved work (see autosave.js).
+  useEffect(() => {
+    if (!fileRef.current) {
+      return undefined;
+    }
+
+    const timeout = window.setTimeout(() => {
+      saveSnapshot(projectIdRef.current, {
+        file: fileRef.current,
+        settings,
+        reinforcementPlan,
+      }).catch(() => {
+        // Best-effort autosave; ignore storage errors (quota, private browsing, etc).
+      });
+    }, 800);
+
+    return () => window.clearTimeout(timeout);
+  }, [model, settings, reinforcementPlan]);
 
   const bounds = useMemo(() => {
     if (!model?.object) {
@@ -144,6 +205,7 @@ export default function App() {
 
     try {
       const loaded = await loadModelFile(file);
+      fileRef.current = file;
       setModel(loaded);
       setActiveLayer(0);
       setGcodePreview('');
