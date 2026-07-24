@@ -34,6 +34,10 @@ export default function SceneView({ model, bounds, layer, layers, settings }) {
         new Vector3(start.x - bounds.center.x, start.y - bounds.center.y, start.z - bounds.center.z),
         new Vector3(end.x - bounds.center.x, end.y - bounds.center.y, end.z - bounds.center.z),
       ]),
+      paths: layer.paths.map((path) => ({
+        closed: path.closed,
+        points: path.points.map((p) => new Vector3(p.x - bounds.center.x, p.y - bounds.center.y, p.z - bounds.center.z)),
+      })),
     };
   }, [layer, bounds]);
 
@@ -106,11 +110,16 @@ function BeadPreview({ layer, beadWidth, beadHeight }) {
 
   return (
     <group>
-      {layer.segments.map((segment, index) => {
-        const curve = new CatmullRomCurve3(segment);
+      {layer.paths.map((path, index) => {
+        if (path.points.length < 2) {
+          return null;
+        }
+
+        const curve = new CatmullRomCurve3(path.points, path.closed);
+        const tubularSegments = Math.max(3, path.points.length * 4);
         return (
           <mesh key={`${layer.index}-bead-${index}`} castShadow receiveShadow>
-            <tubeGeometry args={[curve, 3, radius, 10, false]} />
+            <tubeGeometry args={[curve, tubularSegments, radius, 10, path.closed]} />
             <meshStandardMaterial color="#9aa0a6" roughness={0.86} metalness={0.01} />
           </mesh>
         );

@@ -31,7 +31,7 @@ async function loadObj(file) {
 async function load3dm(file) {
   const buffer = await file.arrayBuffer();
   const loader = new Rhino3dmLoader();
-  loader.setLibraryPath('/vendor/rhino3dm/');
+  loader.setLibraryPath(`${import.meta.env.BASE_URL}vendor/rhino3dm/`);
   const object = await loader.parseAsync(buffer);
   normalizeMeshes(object);
   return { name: file.name, type: '3dm', object };
@@ -57,14 +57,14 @@ async function loadStep(file) {
 }
 
 async function loadOcct() {
-  await loadScript('/vendor/occt/occt-import-js.js');
+  await loadScript(`${import.meta.env.BASE_URL}vendor/occt/occt-import-js.js`);
 
   if (!window.occtimportjs) {
     throw new Error('STEP 변환 라이브러리를 불러오지 못했습니다.');
   }
 
   return window.occtimportjs({
-    locateFile: (path) => `/vendor/occt/${path}`,
+    locateFile: (path) => `${import.meta.env.BASE_URL}vendor/occt/${path}`,
   });
 }
 

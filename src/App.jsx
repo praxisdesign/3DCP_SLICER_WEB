@@ -18,6 +18,7 @@ import {
   Pause,
   Play,
   Printer,
+  Shield,
   Upload,
 } from 'lucide-react';
 import SceneView from './components/SceneView.jsx';
@@ -41,6 +42,17 @@ const defaultSettings = {
   showAllBeads: false,
 };
 
+const REINFORCEMENT_TYPES = [
+  { value: 'mesh', label: '수평 메시' },
+  { value: 'rebar', label: '철근 매트' },
+  { value: 'dowel', label: '수직 다월' },
+  { value: 'other', label: '기타' },
+];
+
+function reinforcementTypeLabel(value) {
+  return REINFORCEMENT_TYPES.find((type) => type.value === value)?.label ?? value;
+}
+
 export default function App() {
   const [model, setModel] = useState(null);
   const [settings, setSettings] = useState(defaultSettings);
@@ -50,6 +62,8 @@ export default function App() {
   const [isGcodePreviewOpen, setIsGcodePreviewOpen] = useState(false);
   const [isLayerAnimating, setIsLayerAnimating] = useState(false);
   const [layerAnimationSpeed, setLayerAnimationSpeed] = useState(6);
+  const [reinforcementPlan, setReinforcementPlan] = useState([]);
+  const [reinforcementDraft, setReinforcementDraft] = useState({ type: 'mesh', note: '' });
 
   const bounds = useMemo(() => {
     if (!model?.object) {
@@ -64,7 +78,7 @@ export default function App() {
 
   const sliceData = useMemo(() => {
     if (!model?.object || !bounds) {
-      return { layers: [], totalLength: 0 };
+      return { layers: [], totalLength: 0, requestedLayers: 0, clipped: false };
     }
 
     const machineSettings = toMachineSettings(settings);
@@ -76,6 +90,14 @@ export default function App() {
   }, [model, bounds, settings.beadHeightMm, settings.beadWidthMm]);
 
   const selectedLayer = sliceData.layers[Math.min(activeLayer, Math.max(sliceData.layers.length - 1, 0))];
+  const activeReinforcements = useMemo(
+    () => reinforcementPlan.filter((entry) => entry.layer === activeLayer),
+    [reinforcementPlan, activeLayer],
+  );
+  // Pump on/off must be paired — if only one is set, the pump can be switched on for a
+  // path and never explicitly told to stop (or vice versa), leaving it running through
+  // travel moves and after the print ends.
+  const pumpMismatch = Boolean(settings.pumpOnCommand.trim()) !== Boolean(settings.pumpOffCommand.trim());
   const estimate = useMemo(() => {
     const machineSettings = toMachineSettings(settings);
     const volumeM3 = sliceData.totalLength * machineSettings.beadWidth * machineSettings.beadHeight;
@@ -125,6 +147,7 @@ export default function App() {
       setModel(loaded);
       setActiveLayer(0);
       setGcodePreview('');
+      setReinforcementPlan([]);
       setStatus(`${file.name} 로드 완료`);
     } catch (error) {
       setStatus(error instanceof Error ? error.message : '파일을 읽지 못했습니다.');
@@ -138,6 +161,11 @@ export default function App() {
   function createGCode() {
     if (!model || sliceData.layers.length === 0) {
       setStatus('G-code를 만들 슬라이스가 없습니다.');
+      return '';
+    }
+
+    if (pumpMismatch) {
+      setStatus('Pump On/Off 명령을 둘 다 입력하거나 둘 다 비워두세요.');
       return '';
     }
 
@@ -169,6 +197,48 @@ export default function App() {
     link.click();
     URL.revokeObjectURL(url);
     setStatus('G-code 생성 완료');
+  }
+
+  function addReinforcementEntry() {
+    if (sliceData.layers.length === 0) {
+      return;
+    }
+
+    const entry = {
+      id: crypto.randomUUID(),
+      layer: activeLayer,
+      type: reinforcementDraft.type,
+      note: reinforcementDraft.note.trim(),
+    };
+    setReinforcementPlan((current) => [...current, entry].sort((a, b) => a.layer - b.layer));
+    setReinforcementDraft({ type: reinforcementDraft.type, note: '' });
+  }
+
+  function removeReinforcementEntry(id) {
+    setReinforcementPlan((current) => current.filter((entry) => entry.id !== id));
+  }
+
+  function handleExportReinforcementPlan() {
+    if (reinforcementPlan.length === 0) {
+      return;
+    }
+
+    const lines = [
+      `${model?.name ?? '이름 없는 모델'} — 보강재 삽입 계획`,
+      '이 목록은 G-code에 반영되지 않습니다. 표시된 레이어에서 프린터를 수동으로 일시정지하고 삽입하세요.',
+      '',
+      ...reinforcementPlan.map(
+        (entry) => `레이어 ${entry.layer} · ${reinforcementTypeLabel(entry.type)}${entry.note ? ` · ${entry.note}` : ''}`,
+      ),
+    ];
+    const blob = new Blob([lines.join('\n')], { type: 'text/plain;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `${model?.name.replace(/\.[^/.]+$/, '') || 'concrete-print'}-reinforcement-plan.txt`;
+    link.click();
+    URL.revokeObjectURL(url);
+    setStatus('보강재 계획표 내보내기 완료');
   }
 
   return (
@@ -225,6 +295,26 @@ export default function App() {
             unit=""
             onChange={setActiveLayer}
           />
+          {sliceData.clipped && (
+            <div className="layer-alert" role="status">
+              <Layers size={15} aria-hidden="true" />
+              <span>
+                모델 상단이 잘렸습니다 — {sliceData.requestedLayers}개 레이어 중 {sliceData.layers.length}개까지만 표시됩니다.
+                Bead Height를 높이면 전체를 볼 수 있습니다.
+              </span>
+            </div>
+          )}
+          {activeReinforcements.length > 0 && (
+            <div className="layer-alert" role="status">
+              <Shield size={15} aria-hidden="true" />
+              <span>
+                이 레이어에 보강재 삽입 예정 —{' '}
+                {activeReinforcements
+                  .map((entry) => `${reinforcementTypeLabel(entry.type)}${entry.note ? ` (${entry.note})` : ''}`)
+                  .join(', ')}
+              </span>
+            </div>
+          )}
           <div className="playback-row">
             <button
               className="icon-action"
@@ -248,12 +338,79 @@ export default function App() {
               <output>{layerAnimationSpeed} fps</output>
             </label>
           </div>
-          <button className="primary-action" type="button" onClick={handleExportGCode}>
+          <button className="primary-action" type="button" onClick={handleExportGCode} disabled={pumpMismatch}>
             G-code 다운로드
           </button>
-          <button className="secondary-action" type="button" onClick={handlePreviewGCode}>
+          <button className="secondary-action" type="button" onClick={handlePreviewGCode} disabled={pumpMismatch}>
             G-code 미리보기
           </button>
+        </section>
+
+        <section className="panel reinforcement-panel">
+          <h2>
+            <Shield size={17} aria-hidden="true" />
+            보강재 계획
+          </h2>
+          <p className="panel-hint">
+            G-code는 자동으로 바뀌지 않습니다 — 표시된 레이어에서 프린터를 수동으로 일시정지하고 삽입하세요.
+          </p>
+          <label className="select-control">
+            <span>종류</span>
+            <select
+              value={reinforcementDraft.type}
+              onChange={(event) => setReinforcementDraft((current) => ({ ...current, type: event.target.value }))}
+            >
+              {REINFORCEMENT_TYPES.map((type) => (
+                <option key={type.value} value={type.value}>{type.label}</option>
+              ))}
+            </select>
+          </label>
+          <TextControl
+            label="메모"
+            value={reinforcementDraft.note}
+            onChange={(value) => setReinforcementDraft((current) => ({ ...current, note: value }))}
+          />
+          <button
+            className="secondary-action"
+            type="button"
+            onClick={addReinforcementEntry}
+            disabled={sliceData.layers.length === 0}
+          >
+            현재 레이어({activeLayer})에 계획 추가
+          </button>
+
+          {reinforcementPlan.length > 0 && (
+            <>
+              <ul className="reinforcement-list">
+                {reinforcementPlan.map((entry) => (
+                  <li key={entry.id} className={entry.layer === activeLayer ? 'is-current' : ''}>
+                    <button
+                      type="button"
+                      className="reinforcement-jump"
+                      onClick={() => setActiveLayer(entry.layer)}
+                    >
+                      레이어 {entry.layer}
+                    </button>
+                    <span className="reinforcement-note">
+                      {reinforcementTypeLabel(entry.type)}
+                      {entry.note ? ` · ${entry.note}` : ''}
+                    </span>
+                    <button
+                      type="button"
+                      className="reinforcement-remove"
+                      onClick={() => removeReinforcementEntry(entry.id)}
+                      aria-label="계획 삭제"
+                    >
+                      ×
+                    </button>
+                  </li>
+                ))}
+              </ul>
+              <button className="secondary-action" type="button" onClick={handleExportReinforcementPlan}>
+                계획표 내보내기 (.txt)
+              </button>
+            </>
+          )}
         </section>
 
         {gcodePreview && (
@@ -315,6 +472,15 @@ export default function App() {
             value={settings.pumpOffCommand}
             onChange={(value) => updateSetting('pumpOffCommand', value)}
           />
+          {pumpMismatch && (
+            <div className="layer-alert" role="status">
+              <Gauge size={15} aria-hidden="true" />
+              <span>
+                Pump On/Off는 둘 다 입력하거나 둘 다 비워두세요 — 하나만 설정하면 펌프가 이동 구간에서도 계속
+                구동될 수 있어 G-code 생성이 비활성화됩니다.
+              </span>
+            </div>
+          )}
         </section>
 
         <section className="panel">
@@ -372,7 +538,7 @@ export default function App() {
       </aside>
 
       <section className="viewport">
-        <Canvas shadows dpr={[1, 2]}>
+        <Canvas shadows dpr={[1, 2]} gl={{ preserveDrawingBuffer: true }}>
           <color attach="background" args={['#edf1f5']} />
           <PerspectiveCamera makeDefault position={[7, -9, 6]} up={[0, 0, 1]} fov={42} />
           <ambientLight intensity={0.7} />

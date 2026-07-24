@@ -5,10 +5,8 @@ const epsilon = 1e-6;
 export function sliceModel(object, options) {
   const box = new Box3().setFromObject(object);
   const height = box.max.z - box.min.z;
-  const layerCount = Math.min(
-    options.maxLayers,
-    Math.max(1, Math.floor(height / options.layerHeight) + 1),
-  );
+  const requestedLayers = Math.max(1, Math.floor(height / options.layerHeight) + 1);
+  const layerCount = Math.min(options.maxLayers, requestedLayers);
   const layers = [];
   let totalLength = 0;
 
@@ -18,12 +16,81 @@ export function sliceModel(object, options) {
     const length = segments.reduce((sum, [start, end]) => sum + start.distanceTo(end), 0);
 
     if (segments.length > 0) {
-      layers.push({ index, z, segments, length });
+      const paths = stitchSegments(segments);
+      layers.push({ index, z, segments, paths, length });
       totalLength += length;
     }
   }
 
-  return { layers, totalLength };
+  return { layers, totalLength, requestedLayers, clipped: requestedLayers > layerCount };
+}
+
+// Raw per-triangle intersection segments arrive in arbitrary order and don't share
+// endpoint identity, so without stitching, every segment becomes an isolated
+// travel-move + pump-on/off pair in the generated G-code — the concrete pump can't
+// physically cycle that fast. This chains same-endpoint segments into continuous
+// polylines/loops so each printed path gets one pump-on/off pair.
+function stitchSegments(segments) {
+  const adjacency = new Map();
+
+  function addEdge(key, edge) {
+    if (!adjacency.has(key)) {
+      adjacency.set(key, []);
+    }
+    adjacency.get(key).push(edge);
+  }
+
+  segments.forEach(([a, b], segIndex) => {
+    const keyA = pointKey(a);
+    const keyB = pointKey(b);
+    addEdge(keyA, { segIndex, otherPoint: b, otherKey: keyB });
+    addEdge(keyB, { segIndex, otherPoint: a, otherKey: keyA });
+  });
+
+  const used = new Array(segments.length).fill(false);
+  const paths = [];
+
+  segments.forEach((segment, startIndex) => {
+    if (used[startIndex]) {
+      return;
+    }
+
+    used[startIndex] = true;
+    const points = [segment[0], segment[1]];
+    let closed = false;
+
+    let tailKey = pointKey(points[points.length - 1]);
+    for (;;) {
+      const next = (adjacency.get(tailKey) || []).find((edge) => !used[edge.segIndex]);
+      if (!next) break;
+      used[next.segIndex] = true;
+      points.push(next.otherPoint);
+      tailKey = next.otherKey;
+      if (tailKey === pointKey(points[0])) {
+        closed = true;
+        break;
+      }
+    }
+
+    if (!closed) {
+      let headKey = pointKey(points[0]);
+      for (;;) {
+        const prev = (adjacency.get(headKey) || []).find((edge) => !used[edge.segIndex]);
+        if (!prev) break;
+        used[prev.segIndex] = true;
+        points.unshift(prev.otherPoint);
+        headKey = prev.otherKey;
+        if (headKey === pointKey(points[points.length - 1])) {
+          closed = true;
+          break;
+        }
+      }
+    }
+
+    paths.push({ points, closed });
+  });
+
+  return paths;
 }
 
 function sliceAtZ(object, z) {
